@@ -210,41 +210,18 @@ def getMaxEigenValue(mat):
 def predictTargetDomain(test_subject_ids, test_subject_data, test_subject_label, thetas, weights, mus, sigmas):
 	K = len(thetas)
 	for subject_id in range(len(test_subject_ids)):
-		subject_data = test_subject_data[subject_id].tolist()
-		subject_label = test_subject_label[subject_id].tolist()
-		lambdaa, pi, gamma, nu = initDistributionWeights(K)
-		prior_params = calcPriorParams(lambdaa, pi, gamma, nu)
+		subject_data = test_subject_data[subject_id]
+		subject_label = test_subject_label[subject_id]
+		gamma, nu = initDistributionWeights(K)
 		for activity_index in range(len(subject_data)):
 			if activity_index == 0:
 				continue
 			data_point = subject_data[activity_index]
-			
 
 def initDistributionWeights(K):
-	lambdaa = [1] * K
-	pi = [1] * K
 	gamma = [1] * K
 	nu = [1] * K
-	return lambdaa, pi, gamma, nu
-
-def calcPriorParams(lambdaa, pi, gamma, nu):
-	dir_lambda = calcDirichlet(lambdaa, gamma)
-	dir_pi = calcDirichlet(pi, nu)
-	return dir_lambda*dir_pi
-
-def calcDirichlet(x, a):
-	numerator = calcGammaFn(sum(a))
-	denominator = 1
-	for i in range(len(a)):
-		denominator *= calcGammaFn(a[i])
-		numerator *= (x[i] ** a[i])
-	return numerator/denominator
-
-def calcGammaFn(a):
-	prod = 1
-	for i in range(1, a):
-		prod *= i
-	return prod
+	return gamma, nu
 
 def main():
 	start_time = timeit.default_timer()
