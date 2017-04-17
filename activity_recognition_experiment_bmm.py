@@ -1,31 +1,35 @@
 import pandas as pd
 import numpy as np
 import sys
+import timeit
 from random import uniform
 from sklearn.decomposition import PCA
-from numpy.linalg import inv
+from numpy.linalg import inv, pinv, eigvals
 
 activities = ['WALKING', 'WALKING_UPSTAIRS', 'WALKING_DOWNSTAIRS', 'SITTING', 'STANDING', 'LAYING']
 
 def learnSourceHMM(subject_ids, train_subject_data, train_subject_label, n_class, n_components, n_features):
 	m, n, d = n_components, n_class, n_features
-	all_theta, all_weight, all_mu, all_sigma, c_start = [], [], [], [], []
+	all_theta, all_weight, all_mu, all_sigma= [], [], [], []
 	for subject_id in range(len(subject_ids)):
-		subject_data = train_subject_data[subject_id].tolist()
-		subject_label = train_subject_label[subject_id].tolist()
-		c_start[activities.index(subject_label[0])] += 1
+		subject_data = train_subject_data[subject_id]
+		subject_label = train_subject_label[subject_id]
+		#print('Subject Data Shape: ', np.matrix(subject_data).shape)
+		#print('Subject Label Shape: ', np.matrix(subject_label).shape)
 		alpha, beta, delta, kappa, W, nu = initialHyperparameters(n, m, d)
+		# print('Alpha Shape:', np.matrix(alpha).shape, 'Beta Shape:', np.matrix(beta).shape, 'Delta: ', delta, 'Kappa Shape:', np.matrix(kappa).shape, 'Nu Shape:', np.matrix(nu).shape, )
 		# print('Delta Size :', len(delta), 'Delta[i] Size :', len(delta[0]))
 		# sys.exit()
 		exp_theta, exp_theta_2, exp_weight, exp_weight_2, exp_mu, exp_mu_2, exp_sigma, exp_sigma_2 = [[] * n] * n, [[] * n] * n, [[] * m] * n, [[] * m] * n, [[] * m] * n, [[] * m] * n, [[] * m] * n, [[] * m] * n
 		prev_activity = -1
 		for activity_index in range(len(subject_data)):
 			data_point = subject_data[activity_index]
+			#print("Data point: ", data_point)
 			activity = activities.index(subject_label[activity_index])
 			if prev_activity != -1:
 				alpha[prev_activity] = calcAlphaCap(alpha, prev_activity)
 			beta[activity] = calcAlphaCap(beta, activity)
-			W = calcWCap(W, kappa, delta, data_point, activity)
+			W[activity] = calcWCap(W, kappa, delta, data_point, activity)
 			delta[activity] = calcDeltaCap(delta, kappa, data_point, activity)
 			kappa[activity] = calcAlphaCap(kappa, activity)
 			nu[activity] = calcAlphaCap(nu, activity)
@@ -43,6 +47,8 @@ def learnSourceHMM(subject_ids, train_subject_data, train_subject_label, n_class
 			exp_weight = calcExpTheta(exp_weight, beta)
 			exp_weight_2 = calcExpTheta2(exp_weight_2, beta)
 			exp_mu = delta
+			print('Activity Index:', activity_index)
+			print("W", W)
 			exp_mu_2 = calcExpMu2(exp_mu_2, kappa, nu, d, W)
 			exp_sigma = calcExpSigma(exp_sigma, nu, W)
 			exp_sigma_2 = calcExpSigma2(exp_sigma_2, nu, W)
@@ -68,19 +74,19 @@ def learnSourceHMM(subject_ids, train_subject_data, train_subject_label, n_class
 		# print('Subject ID :', subject_ids[subject_id])
 		# print('Subject Labels :', subject_label)
 		# print('Alpha :', alpha, '\nBeta :', beta, '\nDelta :', delta, '\nKappa :', kappa, '\nW :', W, '\nNu :', nu, '\n')
-	return all_theta, all_weight, all_mu, all_sigma, c_start
+	return all_theta, all_weight, all_mu, all_sigma
 
 def initialHyperparameters(n, m, d):
 	alpha = [[1] * n] * n
 	beta = [[1] * m] * n
 	delta = np.random.uniform(1, 10, d)
 	kappa = uniform(1, 10)
-	W = np.random.uniform(1, 10, (d, d))
+	W = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
 	nu = uniform(d - 1, d + 100)
 	delta = [[delta.tolist()] * m] * n
 	# print('Delta :', delta)
 	kappa = [[kappa] * m] * n
-	W = [[W.tolist()] * m] * n
+	W = [[W] * m] * n
 	nu = [[nu] * m] * n
 	return alpha, beta, delta, kappa, W, nu
 
@@ -107,7 +113,7 @@ def calcWCap(W, kappa, delta, data_point, activity):
 		kappa_val = kappa[activity][index]
 		prod = np.dot(kappa_val/(kappa_val+1), prod)
 		W[activity][index] = W[activity][index] + prod
-	return W 
+	return W[activity] 
 
 def calcExpTheta(exp_theta, alpha):
 	for index in range(len(exp_theta)):
@@ -132,7 +138,7 @@ def calcExpMu2(exp_mu_2, kappa, nu, d, W):
 			numerator = kappa_val + 1
 			denominator = kappa_val * (nu_val - d - 1)
 			const = numerator / denominator
-			W_inv = inv(W_val)
+			W_inv = pinv(W_val)
 			exp_mu_2[index].append(np.dot(const, W_inv))
 	return exp_mu_2
 
@@ -187,22 +193,30 @@ def updateKappa(kappa, nu, d, exp_mu_2, W):
 			nu_val = nu[index][val_i]
 			exp_mu_2_val = exp_mu_2[index][val_i]
 			W_val = W[index][val_i]
-			prod = np.dot(inv(W_val), exp_mu_2_val)
-			prod = (kappa_val - d -1)
-			print('Kappa[index][val_i] :', kappa_val)
-			print('Prod Shape :', prod)
-			kappa[index][val_i] = 1 - prod
+			prod = np.dot(W_val, exp_mu_2_val)
+			prod = np.dot((kappa_val - d - 1), prod)
+			prod = np.eye(d) - inv(prod)
+			#print('Kappa[index][val_i] :', kappa_val)
+			#print('Prod Shape :', prod)
+			kappa[index][val_i] = getMaxEigenValue(prod)
+			print('Kappa', kappa[index][val_i])
 	return kappa
 
-def predictTargetDomain(test_subject_ids, test_subject_data, test_subject_label, thetas, weights, mus, sigmas, c_start):
+def getMaxEigenValue(mat):
+	maxeig = -1
+	maxeig = max(eigvals(mat))
+	return maxeig
+
+def predictTargetDomain(test_subject_ids, test_subject_data, test_subject_label, thetas, weights, mus, sigmas):
 	K = len(thetas)
-	prior_y_0 = [x/K for x in c_start] 
 	for subject_id in range(len(test_subject_ids)):
 		subject_data = test_subject_data[subject_id].tolist()
 		subject_label = test_subject_label[subject_id].tolist()
 		lambdaa, pi, gamma, nu = initDistributionWeights(K)
 		prior_params = calcPriorParams(lambdaa, pi, gamma, nu)
 		for activity_index in range(len(subject_data)):
+			if activity_index == 0:
+				continue
 			data_point = subject_data[activity_index]
 			
 
@@ -233,28 +247,35 @@ def calcGammaFn(a):
 	return prod
 
 def main():
+	start_time = timeit.default_timer()
 	train = pd.read_csv('train.csv')
 	train.set_index(keys = ['subject'], drop = False, inplace = True)
 	train_subject_ids = train['subject'].unique().tolist()
-	train_subject, train_subject_data, train_subject_label, n_features = [], [], [], 260
+	# print('Train subject ids: ', train_subject_ids)
+	train_data = train.drop('subject', axis = 1).drop('Activity', axis = 1).values
+	train_label = train.Activity.values
+	# print('Initial Train Data Shape :', train_data.shape)
+	pca = PCA(n_components = 3)
+	pca.fit(train_data)
+	train_data = pca.transform(train_data)
+	# print('New Train Data Shape :', train_data.shape)
+	train_subject_data, train_subject_label = [], []
 	for subject_id in train_subject_ids:
-		subject = train.loc[train.subject == subject_id]
-		subject_data = subject.drop('subject', axis = 1).drop('Activity', axis = 1).values
-		# print('Initial Subject Data Shape :', subject_data.shape)
-		pca = PCA(n_components = n_features)
-		# pca.fit(subject_data)
-		subject_data_new = pca.fit_transform(subject_data)
-		subject_label = subject.Activity.values
-		train_subject.append(subject)
-		train_subject_data.append(subject_data_new)
+		subject_rows = train[train.subject == subject_id].index.tolist()
+		subject_data = [train_data[i] for i in subject_rows]
+		subject_label = [train_label[i] for i in subject_rows]
+		# print('Train Subject Data Shape: ', np.matrix(subject_data).shape)
+		train_subject_data.append(subject_data)
 		train_subject_label.append(subject_label)
-	n_class, n_components = 6, 10
-	thetas, weights, mus, sigmas, c_start = learnSourceHMM(train_subject_ids, train_subject_data, train_subject_label, n_class, n_components, n_features)
-
+	n_class, n_components, n_features = 6, 4, 3
+	thetas, weights, mus, sigmas = learnSourceHMM(train_subject_ids, train_subject_data, train_subject_label, n_class, n_components, n_features)
+	print('All thetas: ', thetas, '\nAll weights: ', weights, '\nAll mus: ', mus, '\nAll sigmas: ', sigmas)
+	print('Elapsed Time: ', timeit.default_timer() - start_time)
+	sys.exit()
 	test = pd.read_csv('test.csv')
 	test.set_index(keys = ['subject'], drop = False, inplace = True)
 	test_subject_ids = test['subject'].unique().tolist()
-	test_subject, test_subject_data, test_subject_label, n_features = [], [], [], 260
+	test_subject, test_subject_data, test_subject_label, n_features = [], [], [], 3
 	for subject_id in test_subject_ids:
 		subject = test.loc[test.subject == subject_id]
 		subject_data = subject.drop('subject', axis = 1).drop('Activity', axis = 1).values
