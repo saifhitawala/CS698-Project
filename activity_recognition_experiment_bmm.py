@@ -6,21 +6,40 @@ from random import uniform
 from sklearn.decomposition import PCA
 from numpy.linalg import inv, pinv, eigvals
 
+# Activity Classes to be predicted
 activities = ['WALKING', 'WALKING_UPSTAIRS', 'WALKING_DOWNSTAIRS', 'SITTING', 'STANDING', 'LAYING']
 
+'''
+Function for training
+Parameter List:
+subject_ids: ids of the subjects in the source domain
+train_subject_data: sensor data corresponding to the subjects in the source domain
+train_subject_label: labels corresponding to the subject data in the source domain
+n_class: number of label classes
+n_components: number of componenets in the Gaussian Mixture Model
+n_features: number of features corresponding to the subject data in source domain
+Returns: learned parameters theta, w, mu and sigma for each source domain
+'''
 def learnSourceHMM(subject_ids, train_subject_data, train_subject_label, n_class, n_components, n_features):
+
 	m, n, d = n_components, n_class, n_features
 	all_theta, all_weight, all_mu, all_sigma= [], [], [], []
+
 	for subject_id in range(len(subject_ids)):
 		subject_data = train_subject_data[subject_id]
 		subject_label = train_subject_label[subject_id]
+
+		# initialize the hyperparameters randomly
 		alpha, beta, delta, kappa, W, nu = initialHyperparameters(n, m, d)
 		exp_theta, exp_theta_2, exp_weight, exp_weight_2, exp_mu, exp_mu_2, exp_sigma, exp_sigma_2 = [[0] * n] * n, [[0] * n] * n, [[0] * m] * n, [[0] * m] * n, [[0] * m] * n, [[0] * m] * n, [[0] * m] * n, [[0] * m] * n
 		print('Subject ID: ', subject_id)
 		prev_activity = -1
+
 		for activity_index in range(len(subject_data)):
 			data_point = subject_data[activity_index]
 			activity = activities.index(subject_label[activity_index])
+
+			# calculate all the hyperparameter values corresponding to certain activity i or j
 			if prev_activity != -1:
 				alpha[prev_activity] = calcAlphaCap(alpha, prev_activity)
 			beta[activity] = calcAlphaCap(beta, activity)
@@ -28,6 +47,8 @@ def learnSourceHMM(subject_ids, train_subject_data, train_subject_label, n_class
 			delta[activity] = calcDeltaCap(delta, kappa, data_point, activity)
 			kappa[activity] = calcAlphaCap(kappa, activity)
 			nu[activity] = calcAlphaCap(nu, activity)
+
+			# calculate the moments using hyperparameter values
 			exp_theta = calcExpTheta(exp_theta, alpha)
 			exp_theta_2 = calcExpTheta2(exp_theta_2, alpha)
 			exp_weight = calcExpTheta(exp_weight, beta)
@@ -36,6 +57,8 @@ def learnSourceHMM(subject_ids, train_subject_data, train_subject_label, n_class
 			exp_mu_2 = calcExpMu2(exp_mu_2, kappa, nu, d, W)
 			exp_sigma = calcExpSigma(exp_sigma, nu, W)
 			exp_sigma_2 = calcExpSigma2(exp_sigma_2, nu, W)
+
+			# update the hyperparameter values using moments
 			alpha_new = updateAlpha(alpha, exp_theta, exp_theta_2)
 			beta_new = updateAlpha(beta, exp_weight, exp_weight_2)
 			delta_new = exp_mu
@@ -44,6 +67,8 @@ def learnSourceHMM(subject_ids, train_subject_data, train_subject_label, n_class
 			nu_new = updateNu(nu, W, exp_sigma)
 			exp_sigma = convertSigmas(exp_sigma)
 			alpha, beta, delta, W, kappa, prev_activity = alpha_new, beta_new, delta_new, W_new, kappa_new, activity
+
+		# match the moments with parameters
 		theta, weight, mu, sigma = exp_theta, exp_weight, exp_mu, exp_sigma 
 		all_theta.append(theta)
 		all_weight.append(weight)
@@ -51,6 +76,14 @@ def learnSourceHMM(subject_ids, train_subject_data, train_subject_label, n_class
 		all_sigma.append(sigma)
 	return all_theta, all_weight, all_mu, all_sigma
 
+'''
+Initializes the hyperparameters randomly
+Parameter List:
+n: number of label classes
+m: number of componenets in the Gaussian Mixture Model
+d: number of features corresponding to the subject data in source domain
+Returns: initialized hyperparameters
+'''
 def initialHyperparameters(n, m, d):
 	alpha = [[1] * n] * n
 	beta = [[1] * m] * n
@@ -198,43 +231,79 @@ def getMaxEigenValue(mat):
 	maxeig = max(eigvals(mat))
 	return maxeig
 
+'''
+Predicts the activities in the target domain
+Parameter List:
+subject_ids: ids of the subjects in the target domain
+test_subject_data: sensor data corresponding to the subjects in the target domain
+test_subject_label: labels corresponding to the subject data in the target domain
+thetas: list of parameter theta (transition distribution) for all source domains
+weights: list of parameter w (emission distribution) for all source domains
+mus: list of parameter mu (emission distribution) for all source domains
+sigmas: list of parameter sigma (emission distribution) for all source domains
+Returns: list of accuracies for all target domains
+'''
 def predictTargetDomain(test_subject_ids, test_subject_data, test_subject_label, thetas, weights, mus, sigmas):
+
 	K, N, M = len(thetas), len(thetas[0]), len(weights[0][0])
 	accuracies = []
+
+	# iterate over all target domains
 	for subject_id in range(len(test_subject_ids)):
+
 		print('Test Subject ID: ', subject_id)
 		subject_data = test_subject_data[subject_id]
 		subject_label = test_subject_label[subject_id]
+
+		# initialize the hyperparameters
 		lambdaa, pi, gamma, nu = initDistributionWeights(K)
-		exp_lambda, exp_lambda2, exp_pi, exp_pi2, prev_activity, correct_pred = [1]*K, [1]*K, [1]*K, [1]*K, -1, 1
+		exp_lambda, exp_lambda2, exp_pi, exp_pi2, correct_pred = [1]*K, [1]*K, [1]*K, [1]*K, 1
+
+		# iterate over each data point (activity) in the target domain
 		for activity_index in range(len(subject_data)):
 			curr_activity = activities.index(subject_label[activity_index])
 			if activity_index == 0:
-				prev_activity = curr_activity
 				continue
 			data_point = subject_data[activity_index]
 			prob, prob_index, probs = -1, -1, []
+
+			# iterate over all possible current activity j
 			for j in range(N):
 				c_ijkm_sum = 0
+
+				# iterate over all source domains
 				for k in range(K):
 					nu_k = calcNuK(nu, k)
 					phi_k = calcEmissionDist(weights, mus, sigmas, data_point, j, k, M)
 					nu = updateGammaCap(nu, k)
 					gamma_m = calcGammaK(gamma, k)
 					gamma = updateGammaCap(gamma, k)
+
+					# iterate over all possible previous activity i
 					for i in range(N):
 						theta_mij = thetas[k][i][j]
 						c_ijkm = nu_k * gamma_m * phi_k * theta_mij
 						c_ijkm_sum += c_ijkm
+
+				# calculate the moments
 				exp_lambda = calcExpLambda(lambdaa, c_ijkm_sum, exp_lambda)
 				exp_lambda2 = calcExpLambda2(lambdaa, c_ijkm_sum, exp_lambda2)
-				lambdaa = exp_lambda
 				exp_pi = calcExpLambda(pi, c_ijkm_sum, exp_pi)
 				exp_pi2 = calcExpLambda2(pi, c_ijkm_sum, exp_pi2)
+
+				# match the moments
+				lambdaa = exp_lambda
 				pi = exp_pi
+
+				# update the hyperparameters using moments
+				gamma = updateGamma(gamma, exp_lambda, exp_lambda2)
+				nu = updateGamma(nu, exp_pi, exp_pi2)
+
+				# calculate the probability of class j given previous classes i = 1 to N using K source domains
 				prob_j = calcProb(lambdaa, pi, thetas, weights, mus, sigmas, data_point, K, M, N, j)
 				probs.append(prob_j)
-			prev_activity = curr_activity
+
+			# take the max probability valued class as the predicted class
 			probs = normalize(probs)
 			prob = max(probs)
 			prob_index = probs.index(prob)
@@ -242,6 +311,7 @@ def predictTargetDomain(test_subject_ids, test_subject_data, test_subject_label,
 			if prob_index == curr_activity:
 				correct_pred += 1
 			print('Correct Prediction Count: ', correct_pred)
+
 		acc_k = correct_pred/len(subject_data)
 		print('Accuracy for ', subject_id, 'th Test Subject: ', acc_k)
 		accuracies.append(acc_k)
@@ -321,41 +391,53 @@ def calcProb(lambdaa, pi, thetas, weights, mus, sigmas, data_point, K, M, N, j):
 			prob += prob_val
 	return prob
 
+# main function
 def main():
 	start_time = timeit.default_timer()
+
+	# Train and Test data obtained from UCI Machine Learning Repository: https://archive.ics.uci.edu/ml/datasets/Human+Activity+Recognition+Using+Smartphones
 	train = pd.read_csv('train.csv')
 	train.set_index(keys = ['subject'], drop = False, inplace = True)
 	train_subject_ids = train['subject'].unique().tolist()
 	train_data = train.drop('subject', axis = 1).drop('Activity', axis = 1).values
 	train_label = train.Activity.values
+
+	# PCA applied to train data reducing the number of features (dimensionality redcution) from 561 to 3
 	pca = PCA(n_components = 3)
 	pca.fit(train_data)
 	train_data = pca.transform(train_data)
 	train_subject_data, train_subject_label = [], []
+
 	for subject_id in train_subject_ids:
 		subject_rows = train[train.subject == subject_id].index.tolist()
 		subject_data = [train_data[i] for i in subject_rows]
 		subject_label = [train_label[i] for i in subject_rows]
 		train_subject_data.append(subject_data)
 		train_subject_label.append(subject_label)
+
 	n_class, n_components, n_features = 6, 4, 3
 	thetas, weights, mus, sigmas = learnSourceHMM(train_subject_ids, train_subject_data, train_subject_label, n_class, n_components, n_features)
 	print('Elapsed Time: ', timeit.default_timer() - start_time)
+
 	test = pd.read_csv('test.csv')
 	test.set_index(keys = ['subject'], drop = False, inplace = True)
 	test_subject_ids = test['subject'].unique().tolist()
 	test_data = test.drop('subject', axis = 1).drop('Activity', axis = 1).values
 	test_label = test.Activity.values
+
+	# PCA applied to test data reducing the number of features (dimensionality reduction) from 561 to 3
 	pca = PCA(n_components = 3)
 	pca.fit(test_data)
 	test_data = pca.transform(test_data)
 	test_subject_data, test_subject_label = [], []
+
 	for subject_id in test_subject_ids:
 		subject_rows = test[test.subject == subject_id].index.tolist()
 		subject_data = [test_data[i] for i in subject_rows]
 		subject_label = [test_label[i] for i in subject_rows]
 		test_subject_data.append(subject_data)
 		test_subject_label.append(subject_label)
+
 	accuracies = predictTargetDomain(test_subject_ids, test_subject_data, test_subject_label, thetas, weights, mus, sigmas)
 	print('Elapsed Time: ', timeit.default_timer() - start_time) 
 
