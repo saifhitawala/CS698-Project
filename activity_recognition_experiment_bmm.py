@@ -307,11 +307,9 @@ def predictTargetDomain(test_subject_ids, test_subject_data, test_subject_label,
 			probs = normalize(probs)
 			prob = max(probs)
 			prob_index = probs.index(prob)
-			print('prob_index: ', prob_index, 'prob: ', prob )
 			if prob_index == curr_activity:
 				correct_pred += 1
-			print('Correct Prediction Count: ', correct_pred)
-
+	
 		acc_k = correct_pred/len(subject_data)
 		print('Accuracy for ', subject_id, 'th Test Subject: ', acc_k)
 		accuracies.append(acc_k)
@@ -352,9 +350,9 @@ def calcEmissionDist(weights, mus, sigmas, data_point, j, k, M):
 	return final_model
 
 def calcGaussianDist(mu_kju, sigma_kju, data_point):
-	diff = mu_kju - data_point
-	first_term = np.dot(diff.transpose(), sigma_kju)
-	second_term = np.dot(first_term, diff)
+	diff = np.matrix(mu_kju) - np.matrix(data_point)
+	first_term = np.dot(diff, sigma_kju)
+	second_term = np.dot(first_term, diff.transpose())
 	final_term = np.exp(-second_term/2)
 	return final_term
 
@@ -409,15 +407,18 @@ def main():
 	train_subject_data, train_subject_label = [], []
 
 	for subject_id in train_subject_ids:
-		subject_rows = train[train.subject == subject_id].index.tolist()
-		subject_data = [train_data[i] for i in subject_rows]
-		subject_label = [train_label[i] for i in subject_rows]
+		train_list = train.as_matrix().tolist()
+		train_data_list = train_data.tolist()
+		subject_data, subject_label = [], []
+		for data_i in range(len(train_list)):
+			if train_list[data_i][-2] == subject_id:
+				subject_data.append(train_data_list[data_i])
+				subject_label.append(train_list[data_i][-1])
 		train_subject_data.append(subject_data)
 		train_subject_label.append(subject_label)
 
 	n_class, n_components, n_features = 6, 4, 3
 	thetas, weights, mus, sigmas = learnSourceHMM(train_subject_ids, train_subject_data, train_subject_label, n_class, n_components, n_features)
-	print('Elapsed Time: ', timeit.default_timer() - start_time)
 
 	test = pd.read_csv('test.csv')
 	test.set_index(keys = ['subject'], drop = False, inplace = True)
@@ -432,13 +433,18 @@ def main():
 	test_subject_data, test_subject_label = [], []
 
 	for subject_id in test_subject_ids:
-		subject_rows = test[test.subject == subject_id].index.tolist()
-		subject_data = [test_data[i] for i in subject_rows]
-		subject_label = [test_label[i] for i in subject_rows]
+		test_list = test.as_matrix().tolist()
+		test_data_list = test_data.tolist()
+		subject_data, subject_label = [], []
+		for data_i in range(len(test_list)):
+			if test_list[data_i][-2] == subject_id:
+				subject_data.append(test_data_list[data_i])
+				subject_label.append(test_list[data_i][-1])
 		test_subject_data.append(subject_data)
 		test_subject_label.append(subject_label)
 
 	accuracies = predictTargetDomain(test_subject_ids, test_subject_data, test_subject_label, thetas, weights, mus, sigmas)
+	print('Accuracies:', accuracies)
 	print('Elapsed Time: ', timeit.default_timer() - start_time) 
 
 if __name__ == '__main__':
